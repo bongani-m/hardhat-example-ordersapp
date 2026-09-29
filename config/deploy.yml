@@ -16,10 +16,8 @@ proxy:
   ssl: true
   host: ordersapp.gearlog.io
   # The image listens on 8080. Kamal's proxy connects to port 80 by default.
+  # Health checks use the proxy default, GET /up.
   app_port: 8080
-  # This app exposes GET /health. The proxy default is GET /up.
-  healthcheck:
-    path: /health
 
 # Credentials for your image host.
 registry:

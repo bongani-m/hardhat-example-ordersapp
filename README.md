@@ -19,7 +19,7 @@ docker compose up --build
 The app listens on port 8080. It retries each database for up to two minutes.
 
 ```bash
-curl -s localhost:8080/health
+curl -s localhost:8080/up
 curl -s -X POST localhost:8080/orders \
   -H 'content-type: application/json' \
   -d '{"item":"notebook"}'
@@ -28,7 +28,7 @@ curl -s localhost:8080/orders/1
 
 `GET /orders/1` reads HardhatKV first. Right after create, `status` may still be `new`. A moment later the consumer has set it to `done` and refreshed the cache.
 
-`POST /orders` returns 201 with the new order. `GET /health` returns 200 when all three databases answer, and 503 otherwise.
+`POST /orders` returns 201 with the new order. `GET /up` returns 200 when all three databases answer, and 503 otherwise. Kamal's proxy checks that path by default.
 
 Published ports: HardhatDB `3306`, HardhatKV `6399`, HardhatQ `5672`.
 

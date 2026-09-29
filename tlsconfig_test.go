@@ -82,6 +82,38 @@ func TestNormalizePEM(t *testing.T) {
 	}
 }
 
+func TestLoadCertPoolOneLineAndWrapped(t *testing.T) {
+	certPEM, _ := issueIPCert(t, "127.0.0.1")
+	oneLine := strings.ReplaceAll(string(certPEM), "\n", "")
+	if _, err := loadCertPool("", oneLine); err != nil {
+		t.Fatal(err)
+	}
+	spaced := strings.ReplaceAll(string(certPEM), "\n", " ")
+	if _, err := loadCertPool("", spaced); err != nil {
+		t.Fatal(err)
+	}
+	x509PEM := strings.ReplaceAll(string(certPEM), "-----BEGIN CERTIFICATE-----", "-----BEGIN X509 CERTIFICATE-----")
+	x509PEM = strings.ReplaceAll(x509PEM, "-----END CERTIFICATE-----", "-----END X509 CERTIFICATE-----")
+	if _, err := loadCertPool("", x509PEM); err != nil {
+		t.Fatal(err)
+	}
+	glued := strings.ReplaceAll(string(certPEM), "\n", "n")
+	if _, err := loadCertPool("", glued); err != nil {
+		t.Fatal(err)
+	}
+	wrapped := base64.StdEncoding.EncodeToString(certPEM)
+	if _, err := loadCertPool("", wrapped); err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		t.Fatal("fixture PEM did not decode")
+	}
+	if _, err := loadCertPool("", string(block.Bytes)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadEnvCertPoolNamesVariable(t *testing.T) {
 	t.Setenv("MYSQL_TLS_CA", "")
 	t.Setenv("MYSQL_TLS_CA_PEM", "not a certificate")

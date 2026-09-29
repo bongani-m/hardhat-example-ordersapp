@@ -3,11 +3,19 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+var (
+	beginArmor = regexp.MustCompile(`-----BEGIN [A-Z0-9 ]+-----`)
+	endArmor   = regexp.MustCompile(`-----END [A-Z0-9 ]+-----`)
 )
 
 // loadCertPool reads a CA bundle. path is a file (local compose sets
@@ -15,24 +23,30 @@ import (
 // injects MYSQL_TLS_CA_PEM or AMQP_TLS_CA_PEM. An empty path and empty PEM
 // means no custom CA.
 func loadCertPool(path, pemText string) (*x509.CertPool, error) {
-	var pemBytes []byte
+	var text string
 	switch {
 	case path != "":
 		b, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
 		}
-		pemBytes = b
+		text = string(b)
 	case pemText != "":
-		pemBytes = []byte(normalizePEM(pemText))
+		text = pemText
 	default:
 		return nil, nil
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemBytes) {
-		return nil, fmt.Errorf("CA has no certificates")
+	for _, candidate := range pemCandidates(text) {
+		if pool, ok := certPoolFromPEM([]byte(candidate)); ok {
+			return pool, nil
+		}
+		if cert, err := x509.ParseCertificate([]byte(candidate)); err == nil {
+			pool := x509.NewCertPool()
+			pool.AddCert(cert)
+			return pool, nil
+		}
 	}
-	return pool, nil
+	return nil, fmt.Errorf("CA has no certificates (len=%d)", len(strings.TrimSpace(text)))
 }
 
 // loadEnvCertPool loads pathKey's file when that variable is set, otherwise
@@ -52,16 +66,32 @@ func loadEnvCertPool(pathKey, pemKey string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// normalizePEM turns a Kamal/1Password CA value into text AppendCertsFromPEM
-// can parse. Kamal's env file stores newlines as the two characters \n (CRLF
-// as \r\n). Docker --env-file keeps those escapes, a surrounding quote pair,
-// and sometimes a real trailing newline. A real newline must not skip
-// expansion: BEGIN has to start a line, or the pool stays empty. A base64
-// body with no BEGIN/END lines is wrapped as one certificate.
+// normalizePEM turns a Kamal/1Password CA value into text pem.Decode can parse.
+// Kamal's env file stores newlines as the two characters \n. Docker --env-file
+// keeps those escapes, a surrounding quote pair, and sometimes a real trailing
+// newline. A one-line paste has no newline before -----END, which pem.Decode
+// rejects, so the armor is put on its own lines. A base64 body with no
+// BEGIN/END lines is wrapped as one certificate.
 func normalizePEM(s string) string {
-	s = strings.TrimSpace(s)
-	s = stripWrappingQuotes(s)
-	s = strings.TrimSpace(s)
+	s = unescapeKamal(s)
+	if strings.Contains(s, "-----BEGIN ") {
+		return isolateArmor(s)
+	}
+	if s == "" {
+		return s
+	}
+	return "-----BEGIN CERTIFICATE-----\n" + s + "\n-----END CERTIFICATE-----\n"
+}
+
+func unescapeKamal(s string) string {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "\uFEFF")
+	for {
+		next := strings.TrimPrefix(strings.TrimSpace(stripWrappingQuotes(s)), "\uFEFF")
+		if next == s {
+			break
+		}
+		s = next
+	}
 	for strings.Contains(s, `\\`) {
 		s = strings.ReplaceAll(s, `\\`, `\`)
 	}
@@ -70,13 +100,92 @@ func normalizePEM(s string) string {
 	s = strings.ReplaceAll(s, `\r`, "\n")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
-	s = strings.TrimSpace(s)
-	s = stripWrappingQuotes(s)
-	s = strings.TrimSpace(s)
-	if s == "" || strings.Contains(s, "-----BEGIN ") {
+	s = strings.TrimPrefix(strings.TrimSpace(stripWrappingQuotes(s)), "\uFEFF")
+	return strings.TrimSpace(s)
+}
+
+// isolateArmor puts each BEGIN and END line on its own line. pem.Decode
+// ignores a certificate when -----END is not at the start of a line, which is
+// how a one-line or JSON-wrapped CA arrives from 1Password.
+func isolateArmor(s string) string {
+	s = beginArmor.ReplaceAllString(s, "\n$0\n")
+	s = endArmor.ReplaceAllString(s, "\n$0\n")
+	return s
+}
+
+func pemCandidates(s string) []string {
+	flat := unescapeKamal(s)
+	out := []string{normalizePEM(s), s, flat}
+	if glued := unglueNewlines(flat); glued != flat {
+		out = append(out, isolateArmor(glued))
+	}
+	if decoded, ok := decodeBase64PEM(flat); ok {
+		out = append(out, string(decoded), normalizePEM(string(decoded)))
+	}
+	return out
+}
+
+// unglueNewlines repairs a PEM whose \n escapes were reduced to the letter n.
+func unglueNewlines(s string) string {
+	if strings.Contains(s, "\n") || !strings.Contains(s, "-----BEGIN ") {
 		return s
 	}
-	return "-----BEGIN CERTIFICATE-----\n" + s + "\n-----END CERTIFICATE-----\n"
+	s = regexp.MustCompile(`(-----BEGIN [A-Z0-9 ]+-----)n`).ReplaceAllString(s, "$1\n")
+	s = regexp.MustCompile(`n(-----END [A-Z0-9 ]+-----)`).ReplaceAllString(s, "\n$1")
+	s = regexp.MustCompile(`([A-Za-z0-9+/=]{64})n`).ReplaceAllString(s, "$1\n")
+	return s
+}
+
+func decodeBase64PEM(s string) ([]byte, bool) {
+	cleaned := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\n', '\r', '\t':
+			return -1
+		default:
+			return r
+		}
+	}, strings.TrimSpace(s))
+	if len(cleaned) < 32 || strings.Contains(cleaned, "-") {
+		return nil, false
+	}
+	for _, r := range cleaned {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '+', r == '/', r == '=':
+		default:
+			return nil, false
+		}
+	}
+	b, err := base64.StdEncoding.DecodeString(cleaned)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func certPoolFromPEM(pemBytes []byte) (*x509.CertPool, bool) {
+	pool := x509.NewCertPool()
+	rest := pemBytes
+	added := false
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if !strings.HasSuffix(block.Type, "CERTIFICATE") || strings.Contains(block.Type, "REQUEST") {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			continue
+		}
+		pool.AddCert(cert)
+		added = true
+	}
+	if !added {
+		return nil, false
+	}
+	return pool, true
 }
 
 func stripWrappingQuotes(s string) string {

@@ -2,7 +2,7 @@
 // marks them done from a HardhatQ queue.
 //
 //	docker compose up --build
-//	curl -s localhost:8080/health
+//	curl -s localhost:8080/up
 //	curl -s -X POST localhost:8080/orders -H 'content-type: application/json' -d '{"item":"notebook"}'
 //	curl -s localhost:8080/orders/1
 package main
@@ -93,7 +93,7 @@ func main() {
 
 	app := &server{store: store, cache: cache, broker: broker}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", app.health)
+	mux.HandleFunc("GET /up", app.health)
 	mux.HandleFunc("POST /orders", app.createOrder)
 	mux.HandleFunc("GET /orders/{id}", app.getOrder)
 
