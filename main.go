@@ -24,7 +24,11 @@ func main() {
 	defer cancel()
 
 	mysqlAddr := env("MYSQL_ADDR", "localhost:3306")
-	tlsName, err := registerMySQLTLS(env("MYSQL_TLS_CA", ""), mysqlAddr)
+	mysqlCA, err := loadCertPool(env("MYSQL_TLS_CA", ""), env("MYSQL_TLS_CA_PEM", ""))
+	if err != nil {
+		log.Fatal(err)
+	}
+	tlsName, err := registerMySQLTLS(mysqlCA, mysqlAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -43,9 +47,10 @@ func main() {
 	}
 	defer store.Close()
 
-	log.Printf("connecting to hardhatkv %s", env("KV_ADDR", "localhost:6399"))
+	kvAddr := env("KV_ADDR", "localhost:6399")
+	log.Printf("connecting to hardhatkv %s", kvAddr)
 	cache, err := wait(ctx, "hardhatkv", func(ctx context.Context) (*Cache, error) {
-		return OpenCache(ctx, env("KV_ADDR", "localhost:6399"))
+		return OpenCache(ctx, kvAddr, env("KV_PASSWORD", ""))
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -53,9 +58,17 @@ func main() {
 	defer cache.Close()
 
 	amqpURL := env("AMQP_URL", "amqp://guest:guest@localhost:5672/")
+	amqpCA, err := loadCertPool(env("AMQP_TLS_CA", ""), env("AMQP_TLS_CA_PEM", ""))
+	if err != nil {
+		log.Fatal(err)
+	}
+	amqpTLS, err := amqpTLSConfig(amqpURL, amqpCA)
+	if err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("connecting to hardhatq")
 	broker, err := wait(ctx, "hardhatq", func(context.Context) (*Broker, error) {
-		return OpenBroker(amqpURL)
+		return OpenBroker(amqpURL, amqpTLS)
 	})
 	if err != nil {
 		log.Fatal(err)

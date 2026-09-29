@@ -14,8 +14,8 @@ type Cache struct {
 	rdb *redis.Client
 }
 
-func OpenCache(ctx context.Context, addr string) (*Cache, error) {
-	rdb := redis.NewClient(&redis.Options{Addr: addr})
+func OpenCache(ctx context.Context, addr, password string) (*Cache, error) {
+	rdb := redis.NewClient(&redis.Options{Addr: addr, Password: password})
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		rdb.Close()
 		return nil, err

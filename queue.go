@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"log"
@@ -21,8 +22,9 @@ type Broker struct {
 	mu   sync.Mutex
 }
 
-func OpenBroker(url string) (*Broker, error) {
+func OpenBroker(url string, tlsConfig *tls.Config) (*Broker, error) {
 	conn, err := amqp.DialConfig(url, amqp.Config{
+		TLSClientConfig: tlsConfig,
 		Dial: func(network, addr string) (net.Conn, error) {
 			return net.DialTimeout(network, addr, 2*time.Second)
 		},

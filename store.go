@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"regexp"
 	"time"
 
@@ -131,21 +129,14 @@ func mysqlDSN(addr, user, password, dbname, tlsName string) string {
 	return cfg.FormatDSN()
 }
 
-// registerMySQLTLS trusts caPath and checks the server name against the host
-// in addr. An empty caPath leaves the connection plaintext. HardhatDB's
-// bootstrap account uses caching_sha2_password, which this server accepts
-// only on TLS.
-func registerMySQLTLS(caPath, addr string) (string, error) {
-	if caPath == "" {
+// registerMySQLTLS trusts pool and checks the server name against the host in
+// addr. A nil pool leaves the connection plaintext. HardhatDB's bootstrap
+// account uses caching_sha2_password, which a control-plane node accepts only
+// on TLS. The certificate's names are the node's IP addresses, so the host
+// must be that IP.
+func registerMySQLTLS(pool *x509.CertPool, addr string) (string, error) {
+	if pool == nil {
 		return "", nil
-	}
-	pemBytes, err := os.ReadFile(caPath)
-	if err != nil {
-		return "", err
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemBytes) {
-		return "", fmt.Errorf("MYSQL_TLS_CA %s has no certificates", caPath)
 	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -153,11 +144,7 @@ func registerMySQLTLS(caPath, addr string) (string, error) {
 	}
 	const name = "hardhatdb"
 	mysql.DeregisterTLSConfig(name)
-	if err := mysql.RegisterTLSConfig(name, &tls.Config{
-		RootCAs:    pool,
-		ServerName: host,
-		MinVersion: tls.VersionTLS12,
-	}); err != nil {
+	if err := mysql.RegisterTLSConfig(name, clientTLS(host, pool)); err != nil {
 		return "", err
 	}
 	return name, nil

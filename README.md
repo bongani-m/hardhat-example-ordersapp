@@ -32,6 +32,12 @@ curl -s localhost:8080/orders/1
 
 Published ports: HardhatDB `3306`, HardhatKV `6399`, HardhatQ `5672`.
 
+## Control plane
+
+A Kamal deploy runs this process only. HardhatDB, HardhatKV, and HardhatQ are clusters created in the control plane. The control plane user is `root`. Put this server's public address on each cluster's client allowlist.
+
+`MYSQL_ADDR` is a HardhatDB node's public IP and port, such as `203.0.113.10:3306`. `KV_ADDR` is `203.0.113.11:6399`. `AMQP_URL` is `amqps://root:<password>@203.0.113.12:5672`. The server certificate names that public IP, so the host has to be the IP. `MYSQL_TLS_CA` or `MYSQL_TLS_CA_PEM` is the HardhatDB CA. `AMQP_TLS_CA` or `AMQP_TLS_CA_PEM` is the HardhatQ CA, and an `amqps` URL requires one of them. `KV_PASSWORD` is the Redis AUTH password. An empty password skips AUTH, which is what the local HardhatKV container does.
+
 ```bash
 mysql --host=127.0.0.1 --port=3306 --user=root --password=secret \
   --ssl-mode=VERIFY_CA --ssl-ca=certs/ca.crt shop \
