@@ -1,0 +1,5 @@
+/ordersapp
+*.exe
+*.test
+*.out
+.env
