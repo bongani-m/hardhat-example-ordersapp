@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
+	"os"
 	"regexp"
 	"time"
 
@@ -39,11 +43,11 @@ type Store struct {
 
 // OpenStore waits until MySQL accepts a connection, creates the database, and
 // creates the orders table.
-func OpenStore(ctx context.Context, addr, user, password, dbname string) (*Store, error) {
+func OpenStore(ctx context.Context, addr, user, password, dbname, tlsName string) (*Store, error) {
 	if !identRE.MatchString(dbname) {
 		return nil, fmt.Errorf("invalid database name %q", dbname)
 	}
-	admin, err := sql.Open("mysql", mysqlDSN(addr, user, password, ""))
+	admin, err := sql.Open("mysql", mysqlDSN(addr, user, password, "", tlsName))
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +59,7 @@ func OpenStore(ctx context.Context, addr, user, password, dbname string) (*Store
 		return nil, err
 	}
 
-	db, err := sql.Open("mysql", mysqlDSN(addr, user, password, dbname))
+	db, err := sql.Open("mysql", mysqlDSN(addr, user, password, dbname, tlsName))
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +115,7 @@ func (s *Store) MarkDone(ctx context.Context, id int64) error {
 	return err
 }
 
-func mysqlDSN(addr, user, password, dbname string) string {
+func mysqlDSN(addr, user, password, dbname, tlsName string) string {
 	cfg := mysql.Config{
 		User:                 user,
 		Passwd:               password,
@@ -121,7 +125,40 @@ func mysqlDSN(addr, user, password, dbname string) string {
 		ParseTime:            true,
 		Loc:                  time.UTC,
 		AllowNativePasswords: true,
+		TLSConfig:            tlsName,
 		Timeout:              2 * time.Second,
 	}
 	return cfg.FormatDSN()
+}
+
+// registerMySQLTLS trusts caPath and checks the server name against the host
+// in addr. An empty caPath leaves the connection plaintext. HardhatDB's
+// bootstrap account uses caching_sha2_password, which this server accepts
+// only on TLS.
+func registerMySQLTLS(caPath, addr string) (string, error) {
+	if caPath == "" {
+		return "", nil
+	}
+	pemBytes, err := os.ReadFile(caPath)
+	if err != nil {
+		return "", err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return "", fmt.Errorf("MYSQL_TLS_CA %s has no certificates", caPath)
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	const name = "hardhatdb"
+	mysql.DeregisterTLSConfig(name)
+	if err := mysql.RegisterTLSConfig(name, &tls.Config{
+		RootCAs:    pool,
+		ServerName: host,
+		MinVersion: tls.VersionTLS12,
+	}); err != nil {
+		return "", err
+	}
+	return name, nil
 }

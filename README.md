@@ -6,7 +6,11 @@ Each database runs as one container. HardhatDB has no Raft address, so cluster m
 
 The MySQL password `secret` is the local bootstrap password from the HardhatDB container example. It is not a production secret.
 
+HardhatDB creates that account with `caching_sha2_password`. The published server accepts that login on TLS. `certs/` is a local development certificate for the hostname `hardhatdb`. It is not a production CA.
+
 ## Run
+
+HardhatKV and HardhatQ have no `latest` tag on GHCR. Compose pins the published tags: HardhatDB `v0.1.0-alpha.3`, HardhatKV `v1.3.0-alpha.1`, HardhatQ `v0.11.0-alpha.1`.
 
 ```bash
 docker compose up --build
@@ -29,6 +33,7 @@ curl -s localhost:8080/orders/1
 Published ports: HardhatDB `3306`, HardhatKV `6399`, HardhatQ `5672`.
 
 ```bash
-mysql --host=127.0.0.1 --port=3306 --user=root --password=secret shop \
+mysql --host=127.0.0.1 --port=3306 --user=root --password=secret \
+  --ssl-mode=VERIFY_CA --ssl-ca=certs/ca.crt shop \
   --execute="SELECT id, item, status FROM orders;"
 ```

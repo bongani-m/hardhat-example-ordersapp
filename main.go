@@ -23,13 +23,19 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Printf("connecting to hardhatdb %s", env("MYSQL_ADDR", "localhost:3306"))
+	mysqlAddr := env("MYSQL_ADDR", "localhost:3306")
+	tlsName, err := registerMySQLTLS(env("MYSQL_TLS_CA", ""), mysqlAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("connecting to hardhatdb %s", mysqlAddr)
 	store, err := wait(ctx, "hardhatdb", func(ctx context.Context) (*Store, error) {
 		return OpenStore(ctx,
-			env("MYSQL_ADDR", "localhost:3306"),
+			mysqlAddr,
 			env("MYSQL_USER", "root"),
 			env("MYSQL_PASSWORD", "secret"),
 			env("MYSQL_DB", "shop"),
+			tlsName,
 		)
 	})
 	if err != nil {

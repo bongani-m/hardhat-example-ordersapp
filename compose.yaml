@@ -1,23 +1,26 @@
 services:
   hardhatdb:
-    image: ghcr.io/bongani-m/hardhatdb:latest
+    image: ghcr.io/bongani-m/hardhatdb:v0.1.0-alpha.3
     environment:
       HARDHATDB_MYSQL_HOST: 0.0.0.0
       HARDHATDB_BOOTSTRAP_PASSWORD: secret
+      HARDHATDB_TLS_CERT: /certs/server.crt
+      HARDHATDB_TLS_KEY: /certs/server.key
     ports:
       - "3306:3306"
     volumes:
       - hardhatdb:/data
+      - ./certs:/certs:ro
 
   hardhatkv:
-    image: ghcr.io/bongani-m/hardhatkv:latest
+    image: ghcr.io/bongani-m/hardhatkv:v1.3.0-alpha.1
     ports:
       - "6399:6399"
     volumes:
       - hardhatkv:/data
 
   hardhatq:
-    image: ghcr.io/bongani-m/hardhatq:latest
+    image: ghcr.io/bongani-m/hardhatq:v0.11.0-alpha.1
     ports:
       - "5672:5672"
     volumes:
@@ -35,6 +38,9 @@ services:
       MYSQL_DB: shop
       KV_ADDR: hardhatkv:6399
       AMQP_URL: amqp://guest:guest@hardhatq:5672/
+      MYSQL_TLS_CA: /certs/ca.crt
+    volumes:
+      - ./certs:/certs:ro
     depends_on:
       - hardhatdb
       - hardhatkv
