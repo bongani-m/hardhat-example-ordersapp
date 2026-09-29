@@ -10,10 +10,10 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// loadCertPool reads a CA bundle. path is a file. pemText is the PEM itself,
-// used when Kamal injects the control-plane CA as an environment variable.
-// Kamal writes newlines in that value as the two characters \n. An empty path
-// and empty PEM means no custom CA.
+// loadCertPool reads a CA bundle. path is a file (local compose sets
+// MYSQL_TLS_CA or AMQP_TLS_CA). pemText is the PEM itself, used when Kamal
+// injects MYSQL_TLS_CA_PEM or AMQP_TLS_CA_PEM. An empty path and empty PEM
+// means no custom CA.
 func loadCertPool(path, pemText string) (*x509.CertPool, error) {
 	var pemBytes []byte
 	switch {
@@ -35,11 +35,57 @@ func loadCertPool(path, pemText string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
+// loadEnvCertPool loads pathKey's file when that variable is set, otherwise
+// pemKey. The error names the variable that was used so a deploy log shows
+// which CA failed.
+func loadEnvCertPool(pathKey, pemKey string) (*x509.CertPool, error) {
+	path := env(pathKey, "")
+	pemText := env(pemKey, "")
+	pool, err := loadCertPool(path, pemText)
+	if err != nil {
+		name := pemKey
+		if path != "" {
+			name = pathKey
+		}
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	return pool, nil
+}
+
+// normalizePEM turns a Kamal/1Password CA value into text AppendCertsFromPEM
+// can parse. Kamal's env file stores newlines as the two characters \n (CRLF
+// as \r\n). Docker --env-file keeps those escapes, a surrounding quote pair,
+// and sometimes a real trailing newline. A real newline must not skip
+// expansion: BEGIN has to start a line, or the pool stays empty. A base64
+// body with no BEGIN/END lines is wrapped as one certificate.
 func normalizePEM(s string) string {
-	if strings.Contains(s, "\n") {
+	s = strings.TrimSpace(s)
+	s = stripWrappingQuotes(s)
+	s = strings.TrimSpace(s)
+	for strings.Contains(s, `\\`) {
+		s = strings.ReplaceAll(s, `\\`, `\`)
+	}
+	s = strings.ReplaceAll(s, `\r\n`, "\n")
+	s = strings.ReplaceAll(s, `\n`, "\n")
+	s = strings.ReplaceAll(s, `\r`, "\n")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.TrimSpace(s)
+	s = stripWrappingQuotes(s)
+	s = strings.TrimSpace(s)
+	if s == "" || strings.Contains(s, "-----BEGIN ") {
 		return s
 	}
-	return strings.ReplaceAll(s, `\n`, "\n")
+	return "-----BEGIN CERTIFICATE-----\n" + s + "\n-----END CERTIFICATE-----\n"
+}
+
+func stripWrappingQuotes(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
 }
 
 func clientTLS(serverName string, pool *x509.CertPool) *tls.Config {

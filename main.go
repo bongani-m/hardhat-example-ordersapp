@@ -24,7 +24,7 @@ func main() {
 	defer cancel()
 
 	mysqlAddr := env("MYSQL_ADDR", "localhost:3306")
-	mysqlCA, err := loadCertPool(env("MYSQL_TLS_CA", ""), env("MYSQL_TLS_CA_PEM", ""))
+	mysqlCA, err := loadEnvCertPool("MYSQL_TLS_CA", "MYSQL_TLS_CA_PEM")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func main() {
 	defer cache.Close()
 
 	amqpURL := env("AMQP_URL", "amqp://guest:guest@localhost:5672/")
-	amqpCA, err := loadCertPool(env("AMQP_TLS_CA", ""), env("AMQP_TLS_CA_PEM", ""))
+	amqpCA, err := loadEnvCertPool("AMQP_TLS_CA", "AMQP_TLS_CA_PEM")
 	if err != nil {
 		log.Fatal(err)
 	}

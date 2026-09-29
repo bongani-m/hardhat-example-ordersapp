@@ -6,10 +6,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"math/big"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +46,59 @@ func TestLoadCertPoolPEMAndFile(t *testing.T) {
 	}
 	if _, err := loadCertPool("", "not a certificate"); err == nil {
 		t.Fatal("accepted invalid PEM")
+	}
+}
+
+func TestNormalizePEM(t *testing.T) {
+	certPEM, _ := issueIPCert(t, "127.0.0.1")
+	real := string(certPEM)
+	literal := strings.ReplaceAll(real, "\n", `\n`)
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		t.Fatal("fixture PEM did not decode")
+	}
+	bare := base64.StdEncoding.EncodeToString(block.Bytes)
+
+	cases := []string{
+		real,
+		literal,
+		`"` + literal + `"`,
+		"'" + real + "'",
+		literal + "\n",
+		strings.ReplaceAll(real, "\n", `\r\n`),
+		strings.ReplaceAll(literal, `\n`, `\\n`),
+		bare,
+	}
+	for i, in := range cases {
+		got := normalizePEM(in)
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(got)) {
+			t.Fatalf("case %d: normalized PEM has no certificates", i)
+		}
+	}
+
+	if _, err := loadCertPool("", "not a certificate"); err == nil {
+		t.Fatal("accepted invalid PEM")
+	}
+}
+
+func TestLoadEnvCertPoolNamesVariable(t *testing.T) {
+	t.Setenv("MYSQL_TLS_CA", "")
+	t.Setenv("MYSQL_TLS_CA_PEM", "not a certificate")
+	_, err := loadEnvCertPool("MYSQL_TLS_CA", "MYSQL_TLS_CA_PEM")
+	if err == nil || !strings.Contains(err.Error(), "MYSQL_TLS_CA_PEM") || strings.Contains(err.Error(), "not a certificate") {
+		t.Fatalf("error %v", err)
+	}
+
+	certPEM, _ := issueIPCert(t, "127.0.0.1")
+	path := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(path, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MYSQL_TLS_CA", path)
+	t.Setenv("MYSQL_TLS_CA_PEM", "")
+	if _, err := loadEnvCertPool("MYSQL_TLS_CA", "MYSQL_TLS_CA_PEM"); err != nil {
+		t.Fatal(err)
 	}
 }
 
