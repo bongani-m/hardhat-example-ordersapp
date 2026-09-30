@@ -15,14 +15,16 @@ import (
 	"github.com/bongani-m/hardhat-example-ordersapp/internal/store"
 )
 
-// New is the orders HTTP API. It writes HardhatDB, caches the row, and
-// publishes to HardhatQ. It does not consume the queue.
+// New is the orders HTTP API and the embedded page. It writes HardhatDB,
+// caches the row, and publishes to HardhatQ. It does not consume the queue.
 func New(st *store.Store, c *cache.Cache, b *broker.Broker) http.Handler {
 	s := &server{store: st, cache: c, broker: b}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /up", s.health)
 	mux.HandleFunc("POST /orders", s.createOrder)
+	mux.HandleFunc("GET /orders", s.listOrders)
 	mux.HandleFunc("GET /orders/{id}", s.getOrder)
+	mux.Handle("GET /", staticFiles())
 	return mux
 }
 
@@ -84,6 +86,16 @@ func (s *server) createOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, row)
+}
+
+func (s *server) listOrders(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.store.List(r.Context(), 50)
+	if err != nil {
+		log.Printf("list orders: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 func (s *server) getOrder(w http.ResponseWriter, r *http.Request) {

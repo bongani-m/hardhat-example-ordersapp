@@ -3,6 +3,7 @@
 // ordersapp worker consumes that queue and marks the order done.
 //
 //	docker compose up --build
+//	open http://localhost:8080
 //	curl -s localhost:8080/up
 //	curl -s -X POST localhost:8080/orders -H 'content-type: application/json' -d '{"item":"notebook"}'
 //	curl -s localhost:8080/orders/1

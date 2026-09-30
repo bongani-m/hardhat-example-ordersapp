@@ -88,6 +88,33 @@ func (s *Store) Create(ctx context.Context, item string) (order.Order, error) {
 	return s.Get(ctx, id)
 }
 
+// List returns the newest orders. limit is capped at 50.
+func (s *Store) List(ctx context.Context, limit int) ([]order.Order, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, item, status, created_at FROM orders ORDER BY id DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []order.Order{}
+	for rows.Next() {
+		var row order.Order
+		if err := rows.Scan(&row.ID, &row.Item, &row.Status, &row.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *Store) Get(ctx context.Context, id int64) (order.Order, error) {
 	var row order.Order
 	err := s.db.QueryRowContext(ctx,

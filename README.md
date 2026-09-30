@@ -24,9 +24,22 @@ curl -s -X POST localhost:8080/orders \
   -H 'content-type: application/json' \
   -d '{"item":"notebook"}'
 curl -s localhost:8080/orders/1
+curl -s localhost:8080/orders
 ```
 
-`GET /orders/1` reads HardhatKV first. Right after create, `status` may still be `new`. A moment later the worker has set it to `done` and refreshed the cache.
+Open [http://localhost:8080](http://localhost:8080) for the same flow in the browser. The page lists the latest orders and keeps refreshing while any status is still `new`.
+
+`GET /orders` returns those rows as JSON, newest first, at most 50. `GET /orders/1` reads HardhatKV first. Right after create, `status` may still be `new`. A moment later the worker has set it to `done` and refreshed the cache.
+
+To work on the page without rebuilding the image:
+
+```bash
+cd ui
+npm install
+npm run dev
+```
+
+Vite proxies `/orders` and `/up` to `localhost:8080`. `npm run build` writes the page into `internal/web/dist`, which `go build` embeds. A checkout without that build still compiles: the directory holds a placeholder `index.html`, and the image build replaces it.
 
 `POST /orders` returns 201 with the new order. `GET /up` returns 200 when all three databases answer, and 503 otherwise. Kamal's proxy checks that path by default.
 
