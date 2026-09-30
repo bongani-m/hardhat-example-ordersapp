@@ -1,4 +1,4 @@
-package main
+package tlsconfig
 
 import (
 	"crypto/tls"
@@ -49,12 +49,12 @@ func loadCertPool(path, pemText string) (*x509.CertPool, error) {
 	return nil, fmt.Errorf("CA has no certificates (len=%d)", len(strings.TrimSpace(text)))
 }
 
-// loadEnvCertPool loads pathKey's file when that variable is set, otherwise
+// LoadEnvCertPool loads pathKey's file when that variable is set, otherwise
 // pemKey. The error names the variable that was used so a deploy log shows
 // which CA failed.
-func loadEnvCertPool(pathKey, pemKey string) (*x509.CertPool, error) {
-	path := env(pathKey, "")
-	pemText := env(pemKey, "")
+func LoadEnvCertPool(pathKey, pemKey string) (*x509.CertPool, error) {
+	path := os.Getenv(pathKey)
+	pemText := os.Getenv(pemKey)
 	pool, err := loadCertPool(path, pemText)
 	if err != nil {
 		name := pemKey
@@ -197,7 +197,8 @@ func stripWrappingQuotes(s string) string {
 	return s
 }
 
-func clientTLS(serverName string, pool *x509.CertPool) *tls.Config {
+// Client trusts pool and checks the server certificate against serverName.
+func Client(serverName string, pool *x509.CertPool) *tls.Config {
 	return &tls.Config{
 		RootCAs:    pool,
 		ServerName: serverName,
@@ -205,11 +206,11 @@ func clientTLS(serverName string, pool *x509.CertPool) *tls.Config {
 	}
 }
 
-// amqpTLSConfig is the TLS setup for a control-plane HardhatQ broker.
+// AMQPTLSConfig is the TLS setup for a control-plane HardhatQ broker.
 // amqp:// stays plaintext, which is the local compose broker. amqps:// requires
 // the cluster CA. The server certificate names the node IP, so ServerName is
 // the URL host.
-func amqpTLSConfig(url string, pool *x509.CertPool) (*tls.Config, error) {
+func AMQPTLSConfig(url string, pool *x509.CertPool) (*tls.Config, error) {
 	uri, err := amqp.ParseURI(url)
 	if err != nil {
 		return nil, err
@@ -220,5 +221,5 @@ func amqpTLSConfig(url string, pool *x509.CertPool) (*tls.Config, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("AMQP_TLS_CA or AMQP_TLS_CA_PEM is required for amqps")
 	}
-	return clientTLS(uri.Host, pool), nil
+	return Client(uri.Host, pool), nil
 }

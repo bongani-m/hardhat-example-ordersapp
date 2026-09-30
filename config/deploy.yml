@@ -9,6 +9,11 @@ image: bongani-m/hardhat-example-ordersapp
 servers:
   web:
     - 174.138.44.8
+  worker:
+    hosts:
+      - 174.138.44.8
+    cmd: worker
+    proxy: false
 
 # Enable SSL auto certification via Let's Encrypt and allow for multiple apps on a single web server.
 # Note: If using Cloudflare, set encryption mode in SSL/TLS setting to "Full" to enable CF-to-app encryption.
@@ -58,5 +63,6 @@ aliases:
 builder:
   arch: amd64
 
-# The process retries each cluster for up to two minutes before it listens.
+# The web process retries each cluster for up to two minutes before it listens.
+# The worker command is the argument after the image entrypoint, so the process is `ordersapp worker`.
 deploy_timeout: 180

@@ -1,4 +1,4 @@
-package main
+package cache
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/bongani-m/hardhat-example-ordersapp/internal/order"
 )
 
 // Cache stores order JSON in a single HardhatKV process.
@@ -31,27 +33,27 @@ func (c *Cache) Close() error {
 	return c.rdb.Close()
 }
 
-func (c *Cache) Get(ctx context.Context, id int64) (Order, bool, error) {
+func (c *Cache) Get(ctx context.Context, id int64) (order.Order, bool, error) {
 	raw, err := c.rdb.Get(ctx, orderKey(id)).Bytes()
 	if errors.Is(err, redis.Nil) {
-		return Order{}, false, nil
+		return order.Order{}, false, nil
 	}
 	if err != nil {
-		return Order{}, false, err
+		return order.Order{}, false, err
 	}
-	var order Order
-	if err := json.Unmarshal(raw, &order); err != nil {
-		return Order{}, false, err
+	var row order.Order
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return order.Order{}, false, err
 	}
-	return order, true, nil
+	return row, true, nil
 }
 
-func (c *Cache) Set(ctx context.Context, order Order) error {
-	raw, err := json.Marshal(order)
+func (c *Cache) Set(ctx context.Context, row order.Order) error {
+	raw, err := json.Marshal(row)
 	if err != nil {
 		return err
 	}
-	return c.rdb.Set(ctx, orderKey(order.ID), raw, 0).Err()
+	return c.rdb.Set(ctx, orderKey(row.ID), raw, 0).Err()
 }
 
 func orderKey(id int64) string {

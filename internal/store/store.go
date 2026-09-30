@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"context"
@@ -11,15 +11,10 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
-)
 
-// Order is a row in shop.orders. HardhatDB is the source of truth.
-type Order struct {
-	ID        int64     `json:"id"`
-	Item      string    `json:"item"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-}
+	"github.com/bongani-m/hardhat-example-ordersapp/internal/order"
+	"github.com/bongani-m/hardhat-example-ordersapp/internal/tlsconfig"
+)
 
 // ErrNotFound is returned when an order id is not in HardhatDB.
 var ErrNotFound = errors.New("order not found")
@@ -81,30 +76,30 @@ func (s *Store) Close() error {
 }
 
 // Create inserts an order with status new and reads the stored row back.
-func (s *Store) Create(ctx context.Context, item string) (Order, error) {
+func (s *Store) Create(ctx context.Context, item string) (order.Order, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO orders (item, status) VALUES (?, ?)`, item, "new")
 	if err != nil {
-		return Order{}, err
+		return order.Order{}, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return Order{}, err
+		return order.Order{}, err
 	}
 	return s.Get(ctx, id)
 }
 
-func (s *Store) Get(ctx context.Context, id int64) (Order, error) {
-	var order Order
+func (s *Store) Get(ctx context.Context, id int64) (order.Order, error) {
+	var row order.Order
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, item, status, created_at FROM orders WHERE id = ?`, id,
-	).Scan(&order.ID, &order.Item, &order.Status, &order.CreatedAt)
+	).Scan(&row.ID, &row.Item, &row.Status, &row.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Order{}, ErrNotFound
+		return order.Order{}, ErrNotFound
 	}
 	if err != nil {
-		return Order{}, err
+		return order.Order{}, err
 	}
-	return order, nil
+	return row, nil
 }
 
 // MarkDone sets status to done. A second call leaves the row done.
@@ -129,12 +124,12 @@ func mysqlDSN(addr, user, password, dbname, tlsName string) string {
 	return cfg.FormatDSN()
 }
 
-// registerMySQLTLS trusts pool and checks the server name against the host in
+// RegisterMySQLTLS trusts pool and checks the server name against the host in
 // addr. A nil pool leaves the connection plaintext. HardhatDB's bootstrap
 // account uses caching_sha2_password, which a control-plane node accepts only
 // on TLS. The certificate's names are the node's IP addresses, so the host
 // must be that IP.
-func registerMySQLTLS(pool *x509.CertPool, addr string) (string, error) {
+func RegisterMySQLTLS(pool *x509.CertPool, addr string) (string, error) {
 	if pool == nil {
 		return "", nil
 	}
@@ -144,7 +139,7 @@ func registerMySQLTLS(pool *x509.CertPool, addr string) (string, error) {
 	}
 	const name = "hardhatdb"
 	mysql.DeregisterTLSConfig(name)
-	if err := mysql.RegisterTLSConfig(name, clientTLS(host, pool)); err != nil {
+	if err := mysql.RegisterTLSConfig(name, tlsconfig.Client(host, pool)); err != nil {
 		return "", err
 	}
 	return name, nil

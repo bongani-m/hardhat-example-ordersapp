@@ -1,6 +1,6 @@
 # hardhat-example-ordersapp
 
-A small orders API. [HardhatDB](https://github.com/bongani-m/hardhatdb) stores each order. [HardhatKV](https://github.com/bongani-m/hardhatkv) caches the JSON. [HardhatQ](https://github.com/bongani-m/hardhatq) carries an “order created” message, and this process consumes it and sets the order to `done`.
+A small orders API. [HardhatDB](https://github.com/bongani-m/hardhatdb) stores each order. [HardhatKV](https://github.com/bongani-m/hardhatkv) caches the JSON. [HardhatQ](https://github.com/bongani-m/hardhatq) carries an “order created” message. The `ordersapp` process publishes that message. `ordersapp worker` consumes it and sets the order to `done`.
 
 Each database runs as one container. HardhatDB has no Raft address, so cluster mode stays off. HardhatKV uses the image default, which does not enable cluster mode. HardhatQ is one broker.
 
@@ -16,7 +16,7 @@ HardhatKV and HardhatQ have no `latest` tag on GHCR. Compose pins the published 
 docker compose up --build
 ```
 
-The app listens on port 8080. It retries each database for up to two minutes.
+Compose starts `web` and `worker` from the same image. `web` listens on port 8080. `worker` runs `ordersapp worker`, which is the image entrypoint plus the argument `worker`. Each process retries HardhatDB and HardhatKV for up to two minutes. The worker keeps redialing HardhatQ until it is stopped.
 
 ```bash
 curl -s localhost:8080/up
@@ -26,7 +26,7 @@ curl -s -X POST localhost:8080/orders \
 curl -s localhost:8080/orders/1
 ```
 
-`GET /orders/1` reads HardhatKV first. Right after create, `status` may still be `new`. A moment later the consumer has set it to `done` and refreshed the cache.
+`GET /orders/1` reads HardhatKV first. Right after create, `status` may still be `new`. A moment later the worker has set it to `done` and refreshed the cache.
 
 `POST /orders` returns 201 with the new order. `GET /up` returns 200 when all three databases answer, and 503 otherwise. Kamal's proxy checks that path by default.
 
@@ -34,7 +34,7 @@ Published ports: HardhatDB `3306`, HardhatKV `6399`, HardhatQ `5672`.
 
 ## Control plane
 
-A Kamal deploy runs this process only. HardhatDB, HardhatKV, and HardhatQ are clusters created in the control plane. The control plane user is `root`. Put this server's public address on each cluster's client allowlist.
+A Kamal deploy runs the web process and the worker process on this server. The worker is the same image with command `worker`, and it is not on the public proxy. HardhatDB, HardhatKV, and HardhatQ are clusters created in the control plane. The control plane user is `root`. Put this server's public address on each cluster's client allowlist.
 
 `MYSQL_ADDR` is a HardhatDB node's public IP and port, such as `203.0.113.10:3306`. `KV_ADDR` is `203.0.113.11:6399`. `AMQP_URL` is `amqps://root:<password>@203.0.113.12:5672`. The server certificate names that public IP, so the host has to be the IP. `MYSQL_TLS_CA` or `MYSQL_TLS_CA_PEM` is the HardhatDB CA. `AMQP_TLS_CA` or `AMQP_TLS_CA_PEM` is the HardhatQ CA, and an `amqps` URL requires one of them. `KV_PASSWORD` is the Redis AUTH password. An empty password skips AUTH, which is what the local HardhatKV container does.
 

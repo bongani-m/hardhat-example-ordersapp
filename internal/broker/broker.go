@@ -1,4 +1,4 @@
-package main
+package broker
 
 import (
 	"context"
@@ -11,9 +11,14 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/bongani-m/hardhat-example-ordersapp/internal/order"
 )
 
-const orderQueue = "orders"
+const (
+	orderQueue    = "orders"
+	handleTimeout = 15 * time.Second
+)
 
 // Broker publishes and consumes order events on a single HardhatQ process.
 type Broker struct {
@@ -65,8 +70,8 @@ func (b *Broker) Close() error {
 }
 
 // Publish sends the order JSON to the orders queue.
-func (b *Broker) Publish(ctx context.Context, order Order) error {
-	body, err := json.Marshal(order)
+func (b *Broker) Publish(ctx context.Context, row order.Order) error {
+	body, err := json.Marshal(row)
 	if err != nil {
 		return err
 	}
@@ -79,50 +84,60 @@ func (b *Broker) Publish(ctx context.Context, order Order) error {
 	})
 }
 
-// Consume reads the orders queue until ctx is cancelled. handle runs for each
-// delivery. A handler error requeues the message. A body that is not JSON is
-// discarded.
-func (b *Broker) Consume(ctx context.Context, handle func(context.Context, Order) error) error {
+// Consume reads the orders queue until ctx is cancelled or the delivery
+// channel closes. It blocks. Prefetch is 1, so one message is in flight.
+// A handler error requeues the message. A body that is not JSON is discarded.
+// On cancel, the in-flight handler finishes before Consume returns.
+func (b *Broker) Consume(ctx context.Context, handle func(context.Context, order.Order) error) error {
 	ch, err := b.conn.Channel()
 	if err != nil {
 		return err
 	}
+	defer ch.Close()
 	if err := declareOrderQueue(ch); err != nil {
-		ch.Close()
 		return err
 	}
-	msgs, err := ch.Consume(orderQueue, "", false, false, false, false, nil)
+	if err := ch.Qos(1, 0, false); err != nil {
+		return err
+	}
+	msgs, err := ch.Consume(orderQueue, "ordersapp", false, false, false, false, nil)
 	if err != nil {
-		ch.Close()
 		return err
 	}
-	go func() {
-		defer ch.Close()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case d, ok := <-msgs:
-				if !ok {
-					log.Printf("hardhatq consumer stopped")
-					return
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case d, ok := <-msgs:
+			if !ok {
+				if ctx.Err() != nil {
+					return ctx.Err()
 				}
-				var order Order
-				if err := json.Unmarshal(d.Body, &order); err != nil {
-					log.Printf("discard order message: %v", err)
-					_ = d.Ack(false)
-					continue
-				}
-				if err := handle(ctx, order); err != nil {
-					log.Printf("order %d: %v", order.ID, err)
-					_ = d.Nack(false, true)
-					continue
-				}
-				_ = d.Ack(false)
+				return errors.New("hardhatq consumer stopped")
+			}
+			handleDelivery(ctx, d, handle)
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
 		}
-	}()
-	return nil
+	}
+}
+
+func handleDelivery(ctx context.Context, d amqp.Delivery, handle func(context.Context, order.Order) error) {
+	var row order.Order
+	if err := json.Unmarshal(d.Body, &row); err != nil {
+		log.Printf("discard order message: %v", err)
+		_ = d.Ack(false)
+		return
+	}
+	handleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), handleTimeout)
+	defer cancel()
+	if err := handle(handleCtx, row); err != nil {
+		log.Printf("order %d: %v", row.ID, err)
+		_ = d.Nack(false, true)
+		return
+	}
+	_ = d.Ack(false)
 }
 
 func declareOrderQueue(ch *amqp.Channel) error {

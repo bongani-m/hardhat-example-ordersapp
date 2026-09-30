@@ -1,4 +1,4 @@
-package main
+package tlsconfig
 
 import (
 	"crypto/rand"
@@ -117,7 +117,7 @@ func TestLoadCertPoolOneLineAndWrapped(t *testing.T) {
 func TestLoadEnvCertPoolNamesVariable(t *testing.T) {
 	t.Setenv("MYSQL_TLS_CA", "")
 	t.Setenv("MYSQL_TLS_CA_PEM", "not a certificate")
-	_, err := loadEnvCertPool("MYSQL_TLS_CA", "MYSQL_TLS_CA_PEM")
+	_, err := LoadEnvCertPool("MYSQL_TLS_CA", "MYSQL_TLS_CA_PEM")
 	if err == nil || !strings.Contains(err.Error(), "MYSQL_TLS_CA_PEM") || strings.Contains(err.Error(), "not a certificate") {
 		t.Fatalf("error %v", err)
 	}
@@ -129,24 +129,24 @@ func TestLoadEnvCertPoolNamesVariable(t *testing.T) {
 	}
 	t.Setenv("MYSQL_TLS_CA", path)
 	t.Setenv("MYSQL_TLS_CA_PEM", "")
-	if _, err := loadEnvCertPool("MYSQL_TLS_CA", "MYSQL_TLS_CA_PEM"); err != nil {
+	if _, err := LoadEnvCertPool("MYSQL_TLS_CA", "MYSQL_TLS_CA_PEM"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestAMQPTLSConfig(t *testing.T) {
-	plain, err := amqpTLSConfig("amqp://guest:guest@localhost:5672/", nil)
+	plain, err := AMQPTLSConfig("amqp://guest:guest@localhost:5672/", nil)
 	if err != nil || plain != nil {
 		t.Fatalf("plain tls %v err %v", plain, err)
 	}
-	if _, err := amqpTLSConfig("amqps://root:secret@203.0.113.10:5672", nil); err == nil {
+	if _, err := AMQPTLSConfig("amqps://root:secret@203.0.113.10:5672", nil); err == nil {
 		t.Fatal("amqps without a CA")
 	}
 	pool, err := loadCertPool("", string(issueIPCertPEM(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := amqpTLSConfig("amqps://root:secret@203.0.113.10:5672", pool)
+	cfg, err := AMQPTLSConfig("amqps://root:secret@203.0.113.10:5672", pool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,13 +186,13 @@ func TestClientTrustsControlPlaneIPCert(t *testing.T) {
 		t.Fatal(err)
 	}
 	host, _, _ := net.SplitHostPort(ln.Addr().String())
-	conn, err := tls.Dial("tcp", ln.Addr().String(), clientTLS(host, pool))
+	conn, err := tls.Dial("tcp", ln.Addr().String(), Client(host, pool))
 	if err != nil {
 		t.Fatal(err)
 	}
 	conn.Close()
 
-	_, err = tls.Dial("tcp", ln.Addr().String(), clientTLS("hardhatdb", pool))
+	_, err = tls.Dial("tcp", ln.Addr().String(), Client("hardhatdb", pool))
 	if err == nil {
 		t.Fatal("hostname hardhatdb was accepted for an IP-only certificate")
 	}
